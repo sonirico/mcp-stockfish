@@ -52,14 +52,7 @@ func run() error {
 		Msg("Configuration loaded")
 
 	var executor commandExecutor
-
-	if ServerMode(cfg.Server.Mode) == ServerModeHTTP {
-		sessionManager := newSessionManager(cfg.Stockfish, log)
-		defer sessionManager.Close()
-		executor = NewPersistentSessionExecutor(sessionManager, log)
-	} else {
-		executor = NewEphemeralSessionExecutor(cfg.Stockfish.Path, cfg.Stockfish.CommandTimeout, log)
-	}
+	executor = NewEphemeralSessionExecutor(cfg.Stockfish.Path, cfg.Stockfish.CommandTimeout, log)
 
 	stockfishHandler := newStockfishHandler(executor, log)
 
@@ -69,22 +62,74 @@ func run() error {
 	)
 
 	stockfishTool := mcp.NewTool(
-		"stockfish_command",
-		mcp.WithDescription(
-			"Execute Stockfish UCI commands. Supports session management for concurrent chess analysis.",
-		),
+		"chess_engine",
+		mcp.WithDescription(`
+Advanced chess analysis using Stockfish engine via UCI (Universal Chess Interface).
+Analyzes positions, finds best moves, evaluates positions. Returns structured results.
+
+MOVE NOTATION: Use algebraic notation (e2e4, g1f3, e1g1 for castling, e7e8q for promotion)
+EVALUATION: Centipawns (100 = 1 pawn), positive = White advantage, negative = Black advantage
+
+═══ UCI COMMAND REFERENCE ═══
+
+ENGINE CONTROL:
+┌─ uci           → Initialize engine, get info & options
+├─ isready       → Check if engine ready for commands  
+├─ quit          → Shutdown engine
+└─ stop          → Stop current analysis immediately
+
+POSITION SETUP:
+┌─ position startpos                    → Initial chess position
+├─ position startpos moves e2e4 e7e5    → Initial + move sequence
+├─ position fen [FEN]                   → Custom position from FEN
+└─ position fen [FEN] moves [MOVES]     → Custom FEN + additional moves
+
+ANALYSIS COMMANDS:
+┌─ go depth [N]       → Analyze N plies deep (typical: 15-25)
+├─ go movetime [MS]   → Analyze for N milliseconds (typical: 3000-10000)
+├─ go infinite       → Analyze until stopped (use 'stop' to end)
+├─ go wtime [MS] btime [MS]  → Analysis with time controls
+└─ go nodes [N]      → Analyze exactly N nodes
+
+ENGINE OPTIONS (setoption name [NAME] value [VALUE]):
+┌─ Hash [1-32768]         → Memory in MB (default: 16)
+├─ Threads [1-128]        → CPU threads (default: 1)  
+├─ MultiPV [1-500]        → Show N best lines (default: 1)
+├─ Skill Level [0-20]     → Engine strength (20=strongest)
+├─ Move Overhead [0-5000] → Time buffer in ms
+├─ Slow Mover [10-1000]   → Time usage factor
+└─ Contempt [-100-100]    → Draw tendency
+
+TYPICAL WORKFLOWS:
+1. Quick analysis:    "position startpos moves e2e4" → "go movetime 3000"
+2. Deep analysis:     "position startpos" → "go depth 25" 
+3. Custom position:   "position fen r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -" → "go depth 20"
+4. Multi-line:        "setoption name MultiPV value 3" → "position startpos" → "go depth 18"
+5. Weaker play:       "setoption name Skill Level value 10" → "position startpos" → "go depth 15"
+
+EXAMPLES:
+• "uci" → Get engine info
+• "position startpos moves e2e4 e7e5 g1f3 b8c6" → Set position  
+• "go depth 18" → Deep analysis
+• "setoption name Hash value 512" → Increase memory
+• "setoption name MultiPV value 5" → Show top 5 moves
+		`),
 		mcp.WithString(
 			"command",
 			mcp.Required(),
-			mcp.Description(
-				"Stockfish UCI command to execute (uci, isready, position, go, stop, quit)",
-			),
-		),
-		mcp.WithString(
-			"session_id",
-			mcp.Description(
-				"Session ID for maintaining state across commands. If not provided, a new session is created.",
-			),
+			mcp.Description(`
+Exact UCI command to execute. Use commands from the reference above.
+
+QUICK REFERENCE:
+• uci, isready, quit, stop
+• position startpos [moves MOVE_LIST]  
+• position fen FEN_STRING [moves MOVE_LIST]
+• go depth N | go movetime MS | go infinite
+• setoption name OPTION_NAME value VALUE
+
+MOVE FORMAT: e2e4 e7e5 g1f3 (algebraic notation)
+EXAMPLES: "position startpos moves e2e4", "go depth 15", "setoption name Hash value 256"
+			`),
 		),
 	)
 	s.AddTool(stockfishTool, stockfishHandler.handle)
@@ -100,6 +145,7 @@ func run() error {
 }
 
 func runHTTPServer(s *server.MCPServer, cfg *Config, log zerolog.Logger) error {
+	// TODO: waiting for https://github.com/mark3labs/mcp-go/pull/331
 	return nil
 	//ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	//defer stop()
